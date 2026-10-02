@@ -18,7 +18,7 @@ def patch_json(url, data):
     try: requests.patch(url, json=data, timeout=3)
     except: pass
 
-st.title("🛡️ ESP32 智慧環境與門禁控制中心")
+st.title("智慧環境與門禁控制中心")
 if st.button("🔄 立即重新整理"): st.rerun()
 
 # --- 1. 智慧門禁狀態與線上控制 ---
