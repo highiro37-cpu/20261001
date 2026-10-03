@@ -7,11 +7,12 @@ import time
 st.set_page_config(page_title="雙 Firebase 智慧管理系統", page_icon="🛡️", layout="centered")
 
 # --- 1. 設定兩組獨立的 Firebase URL ---
-# 門禁伺服器 (Door Server)
 DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast1.firebasedatabase.app"
-DOOR_URL = f"{DOOR_BASE_URL}/door.json"
 
-# 環境伺服器 (Environment Server)
+# 拆開成 ESP32 正在讀寫的精確端點
+DOOR_STATUS_URL = f"{DOOR_BASE_URL}/door/status.json"
+DOOR_CONTROL_URL = f"{DOOR_BASE_URL}/door/control.json"
+
 ENV_BASE_URL = "https://project-6542053176802607257-default-rtdb.asia-southeast1.firebasedatabase.app"
 ENV_DATA_URL = f"{ENV_BASE_URL}/data.json"
 ENV_HIST_URL = f"{ENV_BASE_URL}/history.json"
@@ -23,22 +24,21 @@ SENSORS = [
     ('light', '☀️ 光照', 'Lux', '#FFA000')
 ]
 
-# --- API 存取工具函數 ---
 def get_json(url):
     try:
         response = requests.get(url, timeout=3)
-        return response.json() if response.status_code == 200 and response.json() is not None else {}
+        return response.json() if response.status_code == 200 else None
     except Exception:
-        return {}
+        return None
 
-def patch_json(url, data):
+def put_json(url, data):
     try:
-        requests.patch(url, json=data, timeout=3)
-        return True
+        # 使用 PUT 直接覆蓋單一值，確保與 ESP32 的 urequests 匹配
+        response = requests.put(url, json=data, timeout=3)
+        return response.status_code == 200
     except Exception:
         return False
 
-# --- 頁面標題與側邊欄設定 ---
 st.title("智慧環境與門禁控制中心")
 
 with st.sidebar:
@@ -50,16 +50,16 @@ with st.sidebar:
 # --- 1. 門禁伺服器區域 ---
 st.subheader("🚪 門禁狀態與遠端控制")
 
-door_data = get_json(DOOR_URL)
-door_status = door_data.get('status', -1) if isinstance(door_data, dict) else -1
+# 直接讀取 status.json
+door_status = get_json(DOOR_STATUS_URL)
 
 col1, col2 = st.columns(2)
 
 with col1:
-    # 支援 ESP32 回傳的 1 (開門) 與 0 (關門)
-    if str(door_status) == "1" or door_status == 1:
+    # 支援數字 1/0，字串 "1"/"0"，或 True/False
+    if str(door_status) in ["1", "true", "True"]:
         st.metric(label="目前門禁狀態", value="🟢 已開啟")
-    elif str(door_status) == "0" or door_status == 0:
+    elif str(door_status) in ["0", "false", "False"]:
         st.metric(label="目前門禁狀態", value="🔴 已關閉 / 上鎖")
     else:
         st.metric(label="目前門禁狀態", value="❓ 未知狀態")
@@ -76,10 +76,10 @@ with col2:
         st.success("✅ 驗證成功")
         action = st.radio("選擇控制指令：", ["開門", "關門"], horizontal=True)
         if st.button("🚀 發送控制指令", use_container_width=True):
-            # 將指令轉成 ESP32 相容的數字：開門 -> 1, 關門 -> 0
             cmd_val = 1 if action == "開門" else 0
             
-            success = patch_json(DOOR_URL, {"control": cmd_val, "timestamp": int(time.time() * 1000)})
+            # 使用 PUT 直接將 1 或 0 寫入 /door/control.json
+            success = put_json(DOOR_CONTROL_URL, cmd_val)
             if success:
                 st.toast(f"已發送指令 ({cmd_val}) 至門禁 Firebase！", icon="✅")
                 time.sleep(0.5)
@@ -95,7 +95,7 @@ st.divider()
 
 # --- 2. 環境伺服器區域 ---
 st.subheader("🌍 環境感測器即時概覽")
-d = get_json(ENV_DATA_URL)
+d = get_json(ENV_DATA_URL) or {}
 
 ts = d.get('timestamp', 0) if isinstance(d, dict) else 0
 ts_s = ts / 1000.0 if ts > 1e11 else ts
@@ -117,7 +117,7 @@ st.divider()
 
 # --- 3. 環境歷史趨勢圖 ---
 st.subheader("📊 環境歷史趨勢")
-h = get_json(ENV_HIST_URL)
+h = get_json(ENV_HIST_URL) or {}
 
 if h and isinstance(h, dict):
     df = pd.DataFrame(list(h.values()))
