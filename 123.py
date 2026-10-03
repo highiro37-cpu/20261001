@@ -16,6 +16,9 @@ DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast
 SECRET_PASSWORD = "13579"
 
 
+HEARTBEAT_TIMEOUT = 20  # 超過幾秒沒收到心跳就視為斷電/離線
+
+
 def fetch_json(url):
     try:
         res = requests.get(url, timeout=3)
@@ -24,32 +27,48 @@ def fetch_json(url):
         return None
 
 
+@st.cache_data(ttl=5, show_spinner=False)
+def fetch_env_data():
+    return fetch_json(ENV_DATA_URL)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_history():
+    return fetch_json(ENV_HISTORY_URL)
+
+
+@st.cache_data(ttl=2, show_spinner=False)
+def get_door_info():
+    """一次讀取 door 節點 (status / heartbeat)，2 秒內共用快取，多人開網頁也只打一次 Firebase"""
+    return fetch_json(f"{DOOR_BASE_URL}/door.json")
+
+
 def send_door_cmd(cmd_val):
     """control: 1 = 開門, 2 = 關門 (ESP32 處理完會自動重設為 0)"""
     try:
         res = requests.put(f"{DOOR_BASE_URL}/door/control.json", json=int(cmd_val), timeout=3)
         if res.status_code == 200:
             st.session_state['predicted_door_status'] = 1 if int(cmd_val) == 1 else 0
+            get_door_info.clear()
             return True
         return False
     except Exception:
         return False
 
 
-def get_door_status():
-    try:
-        res = requests.get(f"{DOOR_BASE_URL}/door/status.json", timeout=3)
-        if res.status_code == 200:
-            val = res.json()
-            if val is not None:
-                val_str = str(val).strip().lower()
-                if val_str in ["1", "true"]:
-                    return 1
-                elif val_str in ["0", "false"]:
-                    return 0
+def parse_status(val):
+    if val is None:
         return None
-    except Exception:
-        return None
+    val_str = str(val).strip().lower()
+    if val_str in ["1", "true"]:
+        return 1
+    if val_str in ["0", "false"]:
+        return 0
+    return None
+
+
+def fmt_ts(ts_ms):
+    return pd.to_datetime(ts_ms, unit='ms', utc=True).tz_convert('Asia/Taipei').strftime('%Y/%m/%d %H:%M:%S')
 
 
 if 'predicted_door_status' not in st.session_state:
@@ -67,6 +86,8 @@ if auto_refresh:
 
 # None 代表不自動更新
 refresh_every = refresh_interval if auto_refresh else None
+# 環境數據不需要太頻繁，最少 10 秒
+env_refresh_every = max(refresh_interval, 10) if auto_refresh else None
 
 
 # ==========================================
@@ -74,35 +95,51 @@ refresh_every = refresh_interval if auto_refresh else None
 # ==========================================
 @st.fragment(run_every=refresh_every)
 def door_status_panel():
-    real_status = get_door_status()
-    if real_status is not None:
-        door_status = real_status
-        st.session_state['predicted_door_status'] = real_status
-    else:
-        door_status = st.session_state.get('predicted_door_status')
+    info = get_door_info()
+    info = info if isinstance(info, dict) else {}
+
+    heartbeat = info.get('heartbeat')
+    real_status = parse_status(info.get('status'))
+
+    # 判斷 ESP32 是否還在運作 (用心跳時間判斷)
+    online = False
+    age_sec = None
+    if isinstance(heartbeat, (int, float)):
+        age_sec = time.time() - heartbeat / 1000.0
+        online = age_sec < HEARTBEAT_TIMEOUT
 
     col_d1, col_d2 = st.columns([2, 1])
     with col_d1:
-        if door_status == 1:
-            st.success("🔓 目前狀態：門鎖已開啟 (Unlocked)")
-        elif door_status == 0:
-            st.error("🔒 目前狀態：門鎖已關閉 (Locked)")
+        if online:
+            if real_status is not None:
+                st.session_state['predicted_door_status'] = real_status
+            door_status = real_status if real_status is not None else st.session_state.get('predicted_door_status')
+            if door_status == 1:
+                st.success("🔓 目前狀態：門鎖已開啟 (Unlocked)")
+            elif door_status == 0:
+                st.error("🔒 目前狀態：門鎖已關閉 (Locked)")
+            else:
+                st.warning("⚠ 門禁狀態：讀取中")
         else:
-            st.warning("⚠ 門禁狀態：連線中 / 無法讀取")
+            st.session_state['predicted_door_status'] = None
+            st.warning("⚠ 門鎖狀態未知（設備已斷電 / 離線）")
 
     with col_d2:
-        # 按鈕在 fragment 內，點擊只會重跑此區塊
         st.button("🔄 手動刷新", key="btn_refresh_door", use_container_width=True)
 
-    if real_status is not None:
-        st.caption(f"🟢 **設備狀態**：ESP32 門禁控制器連線正常 | 最後擷取：{time.strftime('%H:%M:%S')}")
+    if online:
+        st.caption(f"🟢 **設備狀態：運作中** | 最後心跳：{fmt_ts(heartbeat)}（{int(age_sec)} 秒前）")
+    elif isinstance(heartbeat, (int, float)):
+        st.caption(f"🔴 **設備狀態：已斷電 / 離線** | 最後運作時間：**{fmt_ts(heartbeat)}**")
+    elif info:
+        st.caption("🔴 **設備狀態：尚未收到過心跳**（請確認 ESP32 已更新程式）")
     else:
-        st.caption("🔴 **設備狀態**：無法讀取門禁狀態，ESP32 可能離線或網路異常")
+        st.caption("🔴 **設備狀態：無法連線到 Firebase**")
 
 
-@st.fragment(run_every=refresh_every)
+@st.fragment(run_every=env_refresh_every)
 def env_live_panel():
-    data = fetch_json(ENV_DATA_URL)
+    data = fetch_env_data()
     col1, col2 = st.columns(2)
 
     is_online = False
@@ -206,7 +243,7 @@ with page_tab2:
 
     st.subheader("📊 歷史趨勢圖")
 
-    history_data = fetch_json(ENV_HISTORY_URL)
+    history_data = fetch_history()
 
     if history_data and isinstance(history_data, dict):
         records = list(history_data.values())
