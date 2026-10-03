@@ -16,7 +16,7 @@ ENV_HISTORY_URL = "https://project-6542053176802607257-default-rtdb.asia-southea
 # 門禁系統 Firebase 網址
 DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-# 預設開門密碼
+# 預設開門密碼 (可自行修改)
 SECRET_PASSWORD = "13579"
 
 def fetch_json(url):
@@ -47,10 +47,10 @@ st.title("🌐 ESP32 智慧管理系統")
 page_tab1, page_tab2 = st.tabs(["🔑 遠端門禁控制", "📊 環境數據監控"])
 
 # ==========================================
-# 分頁 1：遠端門禁解鎖控制
+# 分頁 1：遠端門禁控制 (可密碼驗證或一鍵開門)
 # ==========================================
 with page_tab1:
-    st.header("🔑 門禁遠端控制與密碼解鎖")
+    st.header("🔑 門禁遠端控制")
     
     door_status = get_door_status()
     col_d1, col_d2 = st.columns([2, 1])
@@ -69,11 +69,23 @@ with page_tab1:
 
     st.divider()
 
-    # --- 功能 A：網頁密碼解鎖 (開門) ---
-    st.subheader("🔓 網頁密碼解鎖")
+    # --- 方式 1：一鍵遠端開門 ---
+    st.subheader("⚡ 一鍵遠端開鎖")
+    if st.button("🔓 立即遠端開門 (1)", type="primary", use_container_width=True, key="btn_direct_open"):
+        if send_door_cmd(1):
+            st.success("✅ 開門指令已成功發送至 Firebase！")
+            time.sleep(0.8)
+            st.rerun()
+        else:
+            st.error("❌ 開門指令發送失敗，請檢查網路。")
+
+    st.divider()
+
+    # --- 方式 2：密碼驗證開門 ---
+    st.subheader("🔐 網頁密碼解鎖")
     input_pass = st.text_input("請輸入開門密碼：", type="password", placeholder="請輸入密碼", key="pwd_input")
 
-    if st.button("🚀 驗證密碼並開門", type="primary", use_container_width=True, key="btn_open_door"):
+    if st.button("🚀 驗證密碼並開門", use_container_width=True, key="btn_pass_open"):
         if not input_pass:
             st.warning("請先輸入密碼！")
         elif input_pass == SECRET_PASSWORD:
@@ -88,9 +100,9 @@ with page_tab1:
 
     st.divider()
 
-    # --- 功能 B：一鍵關門 ---
+    # --- 關門功能 ---
     st.subheader("🔒 一鍵關門")
-    if st.button("🔴 遠端關門", use_container_width=True, key="btn_close_door"):
+    if st.button("🔴 遠端關門 (0)", use_container_width=True, key="btn_close_door"):
         if send_door_cmd(0):
             st.success("✅ 已發送【關門】指令！")
             time.sleep(0.8)
