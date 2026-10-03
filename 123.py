@@ -16,6 +16,7 @@ DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast
 SECRET_PASSWORD = "13579"
 
 
+MAX_LOG = 1000  # 資料庫最多保留幾筆事件，超過會自動刪除最舊的
 HEARTBEAT_TIMEOUT = 20  # 超過幾秒沒收到心跳就視為斷電/離線
 
 
@@ -57,17 +58,35 @@ def send_door_cmd(cmd_val):
 
 
 @st.cache_data(ttl=5, show_spinner=False)
-def fetch_door_log():
-    """只取最近 15 筆事件"""
+def fetch_door_log(limit=15):
+    """只取最近 limit 筆事件"""
     try:
         res = requests.get(
             f"{DOOR_BASE_URL}/door/log.json",
-            params={"orderBy": '"$key"', "limitToLast": 15},
+            params={"orderBy": '"$key"', "limitToLast": int(limit)},
             timeout=3,
         )
         return res.json() if res.status_code == 200 else None
     except Exception:
         return None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def trim_door_log():
+    """最多每 10 分鐘檢查一次：只下載 key 清單，超過 MAX_LOG 就刪除最舊的"""
+    try:
+        res = requests.get(f"{DOOR_BASE_URL}/door/log.json", params={"shallow": "true"}, timeout=5)
+        if res.status_code != 200 or not isinstance(res.json(), dict):
+            return 0
+        keys = sorted(res.json().keys())  # push key 依時間排序，越前面越舊
+        extra = len(keys) - MAX_LOG
+        if extra <= 0:
+            return 0
+        body = {k: None for k in keys[:extra]}  # null = 刪除
+        r = requests.patch(f"{DOOR_BASE_URL}/door/log.json", json=body, timeout=10)
+        return extra if r.status_code == 200 else 0
+    except Exception:
+        return 0
 
 
 EVENT_NAMES = {
@@ -170,6 +189,26 @@ def door_status_panel():
         st.caption("🔴 **設備狀態：無法連線到 Firebase**")
 
 
+    trim_door_log()  # 有快取，實際最多每 10 分鐘才會執行一次
+
+    with st.expander("📜 最近事件紀錄（最新在上）"):
+        show_n = st.selectbox("顯示筆數", [15, 50, 100, 200], index=0, key="log_show_n")
+        st.caption(f"資料庫最多保留最近 {MAX_LOG} 筆，更舊的會自動刪除")
+        log = fetch_door_log(show_n)
+        if isinstance(log, dict) and log:
+            rows = []
+            for k in sorted(log.keys(), reverse=True):
+                item = log[k]
+                if isinstance(item, dict) and isinstance(item.get('t'), (int, float)):
+                    rows.append({"時間": fmt_ts(item['t']), "事件": EVENT_NAMES.get(item.get('e'), item.get('e', ''))})
+            if rows:
+                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            else:
+                st.caption("尚無紀錄")
+        else:
+            st.caption("尚無紀錄")
+
+
 @st.fragment(run_every=env_refresh_every)
 def env_live_panel():
     data = fetch_env_data()
@@ -229,21 +268,6 @@ with page_tab1:
     st.header("🔑 門禁遠端控制")
 
     door_status_panel()
-
-    with st.expander("📜 最近事件紀錄（最新在上）"):
-        log = fetch_door_log()
-        if isinstance(log, dict) and log:
-            rows = []
-            for k in sorted(log.keys(), reverse=True):
-                item = log[k]
-                if isinstance(item, dict) and isinstance(item.get('t'), (int, float)):
-                    rows.append({"時間": fmt_ts(item['t']), "事件": EVENT_NAMES.get(item.get('e'), item.get('e', ''))})
-            if rows:
-                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-            else:
-                st.caption("尚無紀錄")
-        else:
-            st.caption("尚無紀錄")
 
     st.divider()
 
