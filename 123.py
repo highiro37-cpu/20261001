@@ -266,15 +266,13 @@ with page_tab2:
 # ==========================================
 # 原生 JS 自動定時重新整理 (修正 f-string 大括號轉義)
 # ==========================================
+# ==========================================
+# 支援 Streamlit Cloud 的無障礙自動重新整理 (Meta Refresh)
+# ==========================================
 if auto_refresh:
     st.components.v1.html(
         f"""
-        <script>
-            setTimeout(function(){{
-                window.parent.postMessage({{{{type: 'streamlit:render'}}}}, '*');
-                window.parent.location.reload();
-            }}, {refresh_interval * 1000});
-        </script>
+        <meta http-equiv="refresh" content="{refresh_interval}">
         """,
         height=0,
     )
