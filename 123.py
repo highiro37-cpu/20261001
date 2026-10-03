@@ -50,7 +50,7 @@ auto_refresh = st.sidebar.checkbox("開啟狀態自動更新", value=True)
 refresh_interval = st.sidebar.slider("更新頻率 (秒)", min_value=2, max_value=30, value=3, step=1)
 
 if auto_refresh:
-    st.sidebar.caption(f"⏱️ 網頁每 **{refresh_interval} 秒** 自動向 Firebase 刷新狀態")
+    st.sidebar.caption(f"⏱️ 網頁每 **{refresh_interval} 秒** 背景自動刷新一次")
 
 # ==========================================
 # 頁面主導覽 (Tabs 分頁)
@@ -59,7 +59,7 @@ st.title("🌐 ESP32 智慧管理系統")
 page_tab1, page_tab2 = st.tabs(["🔑 遠端門禁控制", "📊 環境數據監控"])
 
 # ==========================================
-# 分頁 1：遠端門禁控制 (含即時狀態自動同步)
+# 分頁 1：遠端門禁控制
 # ==========================================
 with page_tab1:
     st.header("🔑 門禁遠端控制")
@@ -73,7 +73,7 @@ with page_tab1:
         elif door_status == 0:
             st.error("🔒 目前狀態：門鎖已關閉 (Locked)")
         else:
-            st.warning("⚠️ 門禁狀態：連線中 / 無法讀取")
+            st.warning("⚠️️ 門禁狀態：連線中 / 無法讀取")
             
     with col_d2:
         if st.button("🔄 手動刷新", key="btn_refresh_door", use_container_width=True):
@@ -261,8 +261,17 @@ with page_tab2:
         st.info("💡 尚未讀取到歷史資料。")
 
 # ==========================================
-# 背景定時自動重新整理邏輯 (放在程式碼最底層)
+# 原生 JS 自動定時重新整理 (完全免安裝額外套件)
 # ==========================================
 if auto_refresh:
-    time.sleep(refresh_interval)
-    st.rerun()
+    st.components.v1.html(
+        f"""
+        <script>
+            setTimeout(function(){{
+                window.parent.postMessage({{type: 'streamlit:render'}, '*'});
+                window.parent.location.reload();
+            }}, {refresh_interval * 1000});
+        </script>
+        """,
+        height=0,
+    )
