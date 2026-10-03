@@ -66,7 +66,7 @@ with col2:
     st.write("**🔐 遠端控制驗證**")
     pwd_input = st.text_input("輸入門禁密碼：", type="password", key="door_pwd")
     
-    SECRET_PWD = st.secrets.get("DOOR_PASSWORD", "1234")
+    SECRET_PWD = st.secrets.get("DOOR_PASSWORD", "13579")
     
     if pwd_input == SECRET_PWD:
         st.success("✅ 驗證成功")
