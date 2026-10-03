@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -60,4 +60,4 @@ def send_door_cmd(cmd_val):
 # ==========================================
 # 讀取 ESP32 實際門禁狀態
 #
-```
+
