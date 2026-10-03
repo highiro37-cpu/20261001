@@ -27,7 +27,7 @@ SENSORS = [
 def get_json(url):
     try:
         response = requests.get(url, timeout=3)
-        return response.json() if response.status_code == 200 and response.json() else {}
+        return response.json() if response.status_code == 200 and response.json() is not None else {}
     except Exception:
         return {}
 
@@ -51,30 +51,37 @@ with st.sidebar:
 st.subheader("🚪 門禁狀態與遠端控制")
 
 door_data = get_json(DOOR_URL)
-door_status = door_data.get('status', '未知') if isinstance(door_data, dict) else '未知'
+door_status = door_data.get('status', -1) if isinstance(door_data, dict) else -1
 
 col1, col2 = st.columns(2)
 
 with col1:
-    if "開" in str(door_status) or door_status == "open":
+    # 支援 ESP32 回傳的 1 (開門) 與 0 (關門)
+    if str(door_status) == "1" or door_status == 1:
         st.metric(label="目前門禁狀態", value="🟢 已開啟")
-    else:
+    elif str(door_status) == "0" or door_status == 0:
         st.metric(label="目前門禁狀態", value="🔴 已關閉 / 上鎖")
+    else:
+        st.metric(label="目前門禁狀態", value="❓ 未知狀態")
+        
     st.caption(f"門禁 Server 同步狀態：{door_status}")
 
 with col2:
     st.write("**🔐 遠端控制驗證**")
     pwd_input = st.text_input("輸入門禁密碼：", type="password", key="door_pwd")
     
-    SECRET_PWD = st.secrets.get("DOOR_PASSWORD", "13579")
+    SECRET_PWD = st.secrets.get("DOOR_PASSWORD", "1234")
     
     if pwd_input == SECRET_PWD:
         st.success("✅ 驗證成功")
         action = st.radio("選擇控制指令：", ["開門", "關門"], horizontal=True)
         if st.button("🚀 發送控制指令", use_container_width=True):
-            success = patch_json(DOOR_URL, {"control": action, "timestamp": int(time.time() * 1000)})
+            # 將指令轉成 ESP32 相容的數字：開門 -> 1, 關門 -> 0
+            cmd_val = 1 if action == "開門" else 0
+            
+            success = patch_json(DOOR_URL, {"control": cmd_val, "timestamp": int(time.time() * 1000)})
             if success:
-                st.toast(f"已發送指令至門禁 Firebase！", icon="✅")
+                st.toast(f"已發送指令 ({cmd_val}) 至門禁 Firebase！", icon="✅")
                 time.sleep(0.5)
                 st.rerun()
             else:
