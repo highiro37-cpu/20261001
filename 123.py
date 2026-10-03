@@ -16,12 +16,12 @@ ENV_HISTORY_URL = "https://project-6542053176802607257-default-rtdb.asia-southea
 # 門禁系統 Firebase 網址
 DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-# 預設開門密碼 (可自行修改)
+# 預設開門密碼
 SECRET_PASSWORD = "13579"
 
 def fetch_json(url):
     try:
-        res = requests.get(url, timeout=5)
+        res = requests.get(url, timeout=3)
         return res.json() if res.status_code == 200 else None
     except Exception:
         return None
@@ -43,13 +43,23 @@ def get_door_status():
         return None
 
 # ==========================================
+# 側邊欄：自動重新整理控制面板
+# ==========================================
+st.sidebar.header("⚙️ 網頁自動更新設定")
+auto_refresh = st.sidebar.checkbox("開啟狀態自動更新", value=True)
+refresh_interval = st.sidebar.slider("更新頻率 (秒)", min_value=2, max_value=30, value=3, step=1)
+
+if auto_refresh:
+    st.sidebar.caption(f"⏱️ 網頁每 **{refresh_interval} 秒** 自動向 Firebase 刷新狀態")
+
+# ==========================================
 # 頁面主導覽 (Tabs 分頁)
 # ==========================================
 st.title("🌐 ESP32 智慧管理系統")
 page_tab1, page_tab2 = st.tabs(["🔑 遠端門禁控制", "📊 環境數據監控"])
 
 # ==========================================
-# 分頁 1：遠端門禁控制 (含設備狀態監測)
+# 分頁 1：遠端門禁控制 (含即時狀態自動同步)
 # ==========================================
 with page_tab1:
     st.header("🔑 門禁遠端控制")
@@ -66,12 +76,12 @@ with page_tab1:
             st.warning("⚠️ 門禁狀態：連線中 / 無法讀取")
             
     with col_d2:
-        if st.button("🔄 刷新門鎖狀態", key="btn_refresh_door", use_container_width=True):
+        if st.button("🔄 手動刷新", key="btn_refresh_door", use_container_width=True):
             st.rerun()
 
     # --- 門禁設備連線狀態標示 ---
     if door_status in [0, 1]:
-        st.caption("🟢 **設備狀態**：ESP32 門禁控制器連線正常 (Firebase 通訊 OK)")
+        st.caption(f"🟢 **設備狀態**：ESP32 門禁控制器連線正常 | 最後擷取：{time.strftime('%H:%M:%S')}")
     else:
         st.caption("🔴 **設備狀態**：ESP32 門禁控制器離線或網路異常")
 
@@ -79,13 +89,13 @@ with page_tab1:
 
     # --- 方式 1：一鍵遠端開門 ---
     st.subheader("⚡ 一鍵遠端開鎖")
-    if st.button("🔓 離即遠端開門 (1)", type="primary", use_container_width=True, key="btn_direct_open"):
+    if st.button("🔓 立即遠端開門 (1)", type="primary", use_container_width=True, key="btn_direct_open"):
         if send_door_cmd(1):
-            st.success("✅ 開門指令已成功發送至 Firebase！")
-            time.sleep(0.8)
+            st.success("✅ 開門指令已發送！")
+            time.sleep(0.5)
             st.rerun()
         else:
-            st.error("❌ 開門指令發送失敗，請檢查網路。")
+            st.error("❌ 開門指令發送失敗")
 
     st.divider()
 
@@ -99,10 +109,10 @@ with page_tab1:
         elif input_pass == SECRET_PASSWORD:
             if send_door_cmd(1):
                 st.success("✅ 密碼正確！已發送【開門】指令！")
-                time.sleep(0.8)
+                time.sleep(0.5)
                 st.rerun()
             else:
-                st.error("❌ 開門指令發送失敗，請檢查網路。")
+                st.error("❌ 指令發送失敗")
         else:
             st.error("❌ 密碼錯誤，拒絕開門！")
 
@@ -113,19 +123,16 @@ with page_tab1:
     if st.button("🔴 遠端關門 (0)", use_container_width=True, key="btn_close_door"):
         if send_door_cmd(0):
             st.success("✅ 已發送【關門】指令！")
-            time.sleep(0.8)
+            time.sleep(0.5)
             st.rerun()
         else:
-            st.error("❌ 關門指令發送失敗，請檢查網路。")
+            st.error("❌ 關門指令發送失敗")
 
 # ==========================================
 # 分頁 2：即時與歷史環境監控
 # ==========================================
 with page_tab2:
     st.header("🌍 即時環境數據概覽")
-
-    if st.button("🔄 手動刷新環境數據", key="btn_refresh_env"):
-        st.rerun()
 
     data = fetch_json(ENV_DATA_URL)
     col1, col2 = st.columns(2)
@@ -160,7 +167,7 @@ with page_tab2:
             st.metric(label="🌪️ 氣壓", value=pres_val)
         with col2:
             st.metric(label="💧 濕度", value=hum_val)
-            st.metric(label="☀️️ 光照", value=light_val)
+            st.metric(label="☀️ 光照", value=light_val)
 
         if is_online:
             st.success(f"🟢 環境感測器連線正常 (最後更新：{last_update_str})")
@@ -252,3 +259,10 @@ with page_tab2:
 
     else:
         st.info("💡 尚未讀取到歷史資料。")
+
+# ==========================================
+# 背景定時自動重新整理邏輯 (放在程式碼最底層)
+# ==========================================
+if auto_refresh:
+    time.sleep(refresh_interval)
+    st.rerun()
