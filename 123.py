@@ -152,8 +152,8 @@ else:
 st.components.v1.html(
     f"""
     <script>
-        setTimeout(function(){{
-            window.parent.postMessage({{type: 'streamlit:rerun'}, '*'});
+        setTimeout(function() {{
+            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
         }}, {refresh_rate * 1000});
     </script>
     """,
