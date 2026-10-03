@@ -36,7 +36,9 @@ def send_door_cmd(cmd_val):
 def get_door_status():
     try:
         res = requests.get(f"{DOOR_BASE_URL}/door/status.json", timeout=3)
-        return res.json()
+        if res.status_code == 200:
+            return res.json()
+        return None
     except Exception:
         return None
 
@@ -47,7 +49,7 @@ st.title("🌐 ESP32 智慧管理系統")
 page_tab1, page_tab2 = st.tabs(["🔑 遠端門禁控制", "📊 環境數據監控"])
 
 # ==========================================
-# 分頁 1：遠端門禁控制 (可密碼驗證或一鍵開門)
+# 分頁 1：遠端門禁控制 (含設備狀態監測)
 # ==========================================
 with page_tab1:
     st.header("🔑 門禁遠端控制")
@@ -67,11 +69,17 @@ with page_tab1:
         if st.button("🔄 刷新門鎖狀態", key="btn_refresh_door", use_container_width=True):
             st.rerun()
 
+    # --- 門禁設備連線狀態標示 ---
+    if door_status in [0, 1]:
+        st.caption("🟢 **設備狀態**：ESP32 門禁控制器連線正常 (Firebase 通訊 OK)")
+    else:
+        st.caption("🔴 **設備狀態**：ESP32 門禁控制器離線或網路異常")
+
     st.divider()
 
     # --- 方式 1：一鍵遠端開門 ---
     st.subheader("⚡ 一鍵遠端開鎖")
-    if st.button("🔓 立即遠端開門 (1)", type="primary", use_container_width=True, key="btn_direct_open"):
+    if st.button("🔓 離即遠端開門 (1)", type="primary", use_container_width=True, key="btn_direct_open"):
         if send_door_cmd(1):
             st.success("✅ 開門指令已成功發送至 Firebase！")
             time.sleep(0.8)
@@ -152,12 +160,12 @@ with page_tab2:
             st.metric(label="🌪️ 氣壓", value=pres_val)
         with col2:
             st.metric(label="💧 濕度", value=hum_val)
-            st.metric(label="☀️ 光照", value=light_val)
+            st.metric(label="☀️️ 光照", value=light_val)
 
         if is_online:
-            st.success(f"🟢 設備連線正常 (最後更新：{last_update_str})")
+            st.success(f"🟢 環境感測器連線正常 (最後更新：{last_update_str})")
         else:
-            st.error(f"🔴 設備已離線 / 斷線 (最後更新：{last_update_str})")
+            st.error(f"🔴 環境感測器已離線 / 斷線 (最後更新：{last_update_str})")
     else:
         with col1:
             st.metric(label="🌡️ 溫度", value="-- °C")
