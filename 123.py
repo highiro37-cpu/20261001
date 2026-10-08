@@ -138,10 +138,10 @@ def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos):
     # 標題放圖表上方，Y 軸不放標題，省出左側空間
     st.caption(f"{label_name} ({unit})")
 
-    # X 軸刻度：最多 4 個，用第幾筆的位置對應時間標籤
+    # X 軸刻度：6 筆以內每個點都標時間，更多則最多 4 個
     labels = dataframe['標籤'].tolist()
     if n > 1:
-        tick_idx = sorted(set(int(round(v)) for v in np.linspace(0, n - 1, min(n, 4))))
+        tick_idx = sorted(set(int(round(v)) for v in np.linspace(0, n - 1, n if n <= 6 else 4)))
     else:
         tick_idx = [0]
     label_expr = json.dumps(labels, ensure_ascii=False) + "[datum.value]"
