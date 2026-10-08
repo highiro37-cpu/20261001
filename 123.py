@@ -16,6 +16,7 @@ DOOR_BASE_URL = "https://project-4996744582843641951-default-rtdb.asia-southeast
 SECRET_PASSWORD = "13579"
 
 
+HISTORY_SLIDER_MAX = 1000  # 歷史圖滑桿上限 (固定值，避免滑桿被重設)
 MAX_LOG = 1000  # 資料庫最多保留幾筆事件，超過會自動刪除最舊的
 HEARTBEAT_TIMEOUT = 20  # 超過幾秒沒收到心跳就視為斷電/離線
 
@@ -335,11 +336,17 @@ with page_tab2:
 
         total_records = len(df)
 
-        # 選項與標籤固定不變，資料筆數增加時不會被重設 (原本的滑桿標籤/最大值會變，造成「跑掉」)
-        range_options = ["最近 30 筆", "最近 60 筆", "最近 120 筆", "最近 240 筆", "最近 480 筆", "全部"]
-        range_choice = st.selectbox("顯示範圍", range_options, index=0, key="history_range")
-        st.caption(f"目前共 {total_records} 筆歷史紀錄")
-        limit = total_records if range_choice == "全部" else int(range_choice.split()[1])
+        # 滑桿的標籤、最小/最大值都固定不變，資料筆數增加時不會被重設 (原本會「跑掉」就是因為這些會變)
+        slider_n = st.slider(
+            "顯示最近幾筆資料",
+            min_value=5,
+            max_value=HISTORY_SLIDER_MAX,
+            value=30,
+            step=5,
+            key="history_limit",
+        )
+        limit = min(slider_n, total_records)
+        st.caption(f"目前共 {total_records} 筆歷史紀錄，圖表顯示最近 {limit} 筆")
 
         df_sub = df.tail(limit).copy()
 
