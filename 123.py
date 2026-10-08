@@ -322,7 +322,16 @@ with page_tab2:
         df = pd.DataFrame(records)
 
         if 'timestamp' in df.columns:
-            df['時間'] = pd.to_datetime(df['timestamp'], unit='ms')
+            # 判斷 timestamp 是毫秒(13位數) 還是 秒(10位數)
+            sample_ts = df['timestamp'].dropna().iloc[0] if not df['timestamp'].dropna().empty else 0
+            unit_val = 'ms' if sample_ts > 1e11 else 's'
+            
+            # 轉為 UTC 時間後，強制轉回台灣時區 (Asia/Taipei)，最後移除時區標籤以利 Altair 繪圖
+            df['時間'] = (
+                pd.to_datetime(df['timestamp'], unit=unit_val, utc=True)
+                .dt.tz_convert('Asia/Taipei')
+                .dt.tz_localize(None)
+            )
             df = df.drop(columns=['timestamp'])
         else:
             df['時間'] = df.index
@@ -358,7 +367,10 @@ with page_tab2:
                     title=f'{label_name} ({unit})',
                     scale=alt.Scale(domain=[domain_min, domain_max])
                 ),
-                tooltip=[alt.Tooltip('時間:T', title='時間', format='%Y-%m-%d %H:%M:%S'), alt.Tooltip(f'{y_col}:Q', title=label_name)]
+                tooltip=[
+                    alt.Tooltip('時間:T', title='時間', format='%Y/%m/%d %H:%M:%S'),
+                    alt.Tooltip(f'{y_col}:Q', title=label_name, format='.1f')
+                ]
             )
 
             line = base.mark_line(color=color, strokeWidth=3, interpolate='monotone')
