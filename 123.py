@@ -455,6 +455,9 @@ with page_tab2:
                 start_t = df_sub.loc[i - 1, '時間']
                 shown.append(f"{start_t.strftime('%m/%d %H:%M')} → {end_t.strftime('%m/%d %H:%M')}")
             st.caption("⚠️ 此範圍內有資料中斷（感測器離線期間沒有資料）：" + "；".join(shown))
+            st.caption("目前模式：" + ("中斷處斷開，以灰色虛線標示" if break_lines else "中斷處連成一條線"))
+        elif break_lines:
+            st.caption("目前顯示的範圍內沒有資料中斷，所以「斷開連線」不會有差別。把上面的滑桿往右拉，加入更早的資料再試試。")
 
         t1, t2, t3, t4 = st.tabs(["🌡️ 溫度", "💧 濕度", "🌪 氣壓", "☀️ 光照"])
 
