@@ -59,7 +59,6 @@ def timestamp_to_taiwan(ts):
         # 13 位數：毫秒
         if ts > 1e11:
             dt = pd.to_datetime(ts, unit="ms", utc=True)
-
         # 10 位數：秒
         else:
             dt = pd.to_datetime(ts, unit="s", utc=True)
@@ -516,4 +515,489 @@ def env_live_panel():
                     is_online = True
 
         # ==================================
-        # 顯示環境數
+        # 顯示環境數據
+        # ==================================
+        if is_online:
+
+            temp_val = f"{data.get('temp', '--')} °C"
+
+            pres_val = f"{data.get('pres', '--')} hPa"
+
+            hum_val = f"{data.get('hum', '--')} %"
+
+            light_val = f"{data.get('light', '--')} Lux"
+
+        else:
+
+            temp_val = "-- °C"
+            pres_val = "-- hPa"
+            hum_val = "-- %"
+            light_val = "-- Lux"
+
+        with col1:
+
+            st.metric(
+                label="🌡️ 溫度",
+                value=temp_val
+            )
+
+            st.metric(
+                label="🌪️ 氣壓",
+                value=pres_val
+            )
+
+        with col2:
+
+            st.metric(
+                label="💧 濕度",
+                value=hum_val
+            )
+
+            st.metric(
+                label="☀️ 光照",
+                value=light_val
+            )
+
+        if is_online:
+
+            st.success(
+                f"🟢 環境感測器連線正常 "
+                f"(最後更新：{last_update_str})"
+            )
+
+        else:
+
+            st.error(
+                f"🔴 環境感測器已離線 / 斷線 "
+                f"(最後更新：{last_update_str})"
+            )
+
+    else:
+
+        with col1:
+
+            st.metric(
+                label="🌡️ 溫度",
+                value="-- °C"
+            )
+
+            st.metric(
+                label="🌪️ 氣壓",
+                value="-- hPa"
+            )
+
+        with col2:
+
+            st.metric(
+                label="💧 濕度",
+                value="-- %"
+            )
+
+            st.metric(
+                label="☀️ 光照",
+                value="-- Lux"
+            )
+
+        st.error(
+            "🔴 無法讀取 Firebase 數據或設備離線"
+        )
+
+
+# ==========================================
+# 主頁面
+# ==========================================
+st.title("🌐 ESP32 智慧管理系統")
+
+page_tab1, page_tab2 = st.tabs([
+    "🔑 遠端門禁控制",
+    "📊 環境數據監控"
+])
+
+
+# ==========================================
+# 分頁 1：遠端門禁
+# ==========================================
+with page_tab1:
+
+    st.header("🔑 門禁遠端控制")
+
+    door_status_panel()
+
+    st.divider()
+
+    # ======================================
+    # 一鍵開門
+    # ======================================
+    st.subheader("⚡ 一鍵遠端開鎖")
+
+    if st.button(
+        "🔓 立即遠端開門",
+        type="primary",
+        use_container_width=True,
+        key="btn_direct_open"
+    ):
+
+        if send_door_cmd(1):
+
+            st.success(
+                "✅ 開門指令已發送！"
+            )
+
+        else:
+
+            st.error(
+                "❌ 開門指令發送失敗"
+            )
+
+    st.divider()
+
+    # ======================================
+    # 密碼開門
+    # ======================================
+    st.subheader("🔐 網頁密碼解鎖")
+
+    input_pass = st.text_input(
+        "請輸入開門密碼：",
+        type="password",
+        placeholder="請輸入密碼",
+        key="pwd_input"
+    )
+
+    if st.button(
+        "🚀 驗證密碼並開門",
+        use_container_width=True,
+        key="btn_pass_open"
+    ):
+
+        if not input_pass:
+
+            st.warning(
+                "請先輸入密碼！"
+            )
+
+        elif input_pass == SECRET_PASSWORD:
+
+            if send_door_cmd(1):
+
+                st.success(
+                    "✅ 密碼正確！"
+                    "已發送【開門】指令！"
+                )
+
+            else:
+
+                st.error(
+                    "❌ 指令發送失敗"
+                )
+
+        else:
+
+            st.error(
+                "❌ 密碼錯誤，拒絕開門！"
+            )
+
+    st.divider()
+
+    # ======================================
+    # 關門
+    # ======================================
+    st.subheader("🔒 一鍵關門")
+
+    if st.button(
+        "🔴 遠端關門",
+        use_container_width=True,
+        key="btn_close_door"
+    ):
+
+        if send_door_cmd(2):
+
+            st.success(
+                "✅ 已發送【關門】指令！"
+            )
+
+        else:
+
+            st.error(
+                "❌ 關門指令發送失敗"
+            )
+
+
+# ==========================================
+# 分頁 2：環境監控
+# ==========================================
+with page_tab2:
+
+    st.header("🌍 即時環境數據概覽")
+
+    env_live_panel()
+
+    st.divider()
+
+    st.subheader("📊 歷史趨勢圖")
+
+    history_data = fetch_history()
+
+    if history_data and isinstance(
+        history_data,
+        dict
+    ):
+
+        records = list(
+            history_data.values()
+        )
+
+        df = pd.DataFrame(records)
+
+        # ==================================
+        # ★★★ 歷史時間修復處 ★★★
+        # 使用自訂的 timestamp_to_taiwan，並在最後去掉時區標籤 (.tz_localize(None))
+        # 避免 Altair 繪圖時二次轉換時區導致時間跑掉
+        # ==================================
+        if "timestamp" in df.columns:
+
+            df["時間"] = df["timestamp"].apply(
+                lambda ts: (
+                    timestamp_to_taiwan(ts).tz_localize(None)
+                    if timestamp_to_taiwan(ts) is not None
+                    else None
+                )
+            )
+
+            df = df.drop(
+                columns=["timestamp"]
+            )
+
+        else:
+
+            df["時間"] = df.index
+
+        # ==================================
+        # 移除重複時間
+        # ==================================
+        df = (
+            df
+            .dropna(subset=["時間"])
+            .drop_duplicates(
+                subset=["時間"]
+            )
+            .sort_values("時間")
+        )
+
+        total_records = len(df)
+
+        if total_records > 0:
+
+            default_value = min(
+                30,
+                total_records
+            )
+
+            limit = st.slider(
+                f"顯示最近數據筆數"
+                f"（當前共 {total_records} 筆歷史紀錄）：",
+                min_value=min(
+                    5,
+                    total_records
+                ),
+                max_value=total_records,
+                value=default_value,
+                step=1,
+                key="history_slider"
+            )
+
+            df_sub = df.tail(
+                limit
+            ).copy()
+
+            # ==================================
+            # 趨勢圖
+            # ==================================
+            def make_perfect_chart(
+                dataframe,
+                y_col,
+                label_name,
+                unit,
+                color
+            ):
+
+                if y_col not in dataframe.columns:
+                    return None
+
+                y_min = dataframe[y_col].min()
+
+                y_max = dataframe[y_col].max()
+
+                padding = (
+                    (y_max - y_min) * 0.2
+                    if (y_max - y_min) > 0
+                    else 1
+                )
+
+                domain_min = y_min - padding
+
+                domain_max = y_max + padding
+
+                base = alt.Chart(
+                    dataframe
+                ).encode(
+
+                    x=alt.X(
+                        "時間:T",
+                        title="時間",
+                        axis=alt.Axis(
+                            format="%m/%d %H:%M",
+                            labelAngle=-45
+                        )
+                    ),
+
+                    y=alt.Y(
+                        f"{y_col}:Q",
+                        title=f"{label_name} ({unit})",
+                        scale=alt.Scale(
+                            domain=[
+                                domain_min,
+                                domain_max
+                            ]
+                        )
+                    ),
+
+                    tooltip=[
+                        alt.Tooltip(
+                            "時間:T",
+                            title="時間",
+                            format="%Y-%m-%d %H:%M:%S"
+                        ),
+
+                        alt.Tooltip(
+                            f"{y_col}:Q",
+                            title=label_name
+                        )
+                    ]
+                )
+
+                line = base.mark_line(
+                    color=color,
+                    strokeWidth=3,
+                    interpolate="monotone"
+                )
+
+                points = base.mark_circle(
+                    color=color,
+                    size=40
+                )
+
+                area = base.mark_area(
+                    color=color,
+                    opacity=0.15,
+                    interpolate="monotone"
+                )
+
+                return (
+                    area
+                    + line
+                    + points
+                ).properties(
+                    height=260
+                )
+
+            # ==================================
+            # 四個環境圖
+            # ==================================
+            t1, t2, t3, t4 = st.tabs([
+                "🌡️ 溫度",
+                "💧 濕度",
+                "🌪 氣壓",
+                "☀️ 光照"
+            ])
+
+            with t1:
+
+                if (
+                    "temp" in df_sub.columns
+                    and not df_sub["temp"].empty
+                ):
+
+                    chart = make_perfect_chart(
+                        df_sub,
+                        "temp",
+                        "溫度",
+                        "°C",
+                        "#FF4B4B"
+                    )
+
+                    st.altair_chart(
+                        chart,
+                        use_container_width=True
+                    )
+
+            with t2:
+
+                if (
+                    "hum" in df_sub.columns
+                    and not df_sub["hum"].empty
+                ):
+
+                    chart = make_perfect_chart(
+                        df_sub,
+                        "hum",
+                        "濕度",
+                        "%",
+                        "#1E88E5"
+                    )
+
+                    st.altair_chart(
+                        chart,
+                        use_container_width=True
+                    )
+
+            with t3:
+
+                if (
+                    "pres" in df_sub.columns
+                    and not df_sub["pres"].empty
+                ):
+
+                    chart = make_perfect_chart(
+                        df_sub,
+                        "pres",
+                        "氣壓",
+                        "hPa",
+                        "#9C27B0"
+                    )
+
+                    st.altair_chart(
+                        chart,
+                        use_container_width=True
+                    )
+
+            with t4:
+
+                if (
+                    "light" in df_sub.columns
+                    and not df_sub["light"].empty
+                ):
+
+                    chart = make_perfect_chart(
+                        df_sub,
+                        "light",
+                        "光照",
+                        "ADC",
+                        "#FFA000"
+                    )
+
+                    st.altair_chart(
+                        chart,
+                        use_container_width=True
+                    )
+
+        else:
+
+            st.info(
+                "💡 尚未讀取到有效的歷史資料。"
+            )
+
+    else:
+
+        st.info(
+            "💡 尚未讀取到歷史資料。"
+        )
