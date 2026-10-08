@@ -334,42 +334,64 @@ with page_tab2:
         df = df.drop_duplicates(subset=['時間']).sort_values('時間')
 
         total_records = len(df)
-        default_value = min(30, total_records)
 
-        limit = st.slider(
-            f"顯示最近數據筆數（當前共 {total_records} 筆歷史紀錄）：",
-            min_value=min(5, total_records),
-            max_value=total_records,
-            value=default_value,
-            step=1,
-            key="history_slider"
-        )
+        # 選項與標籤固定不變，資料筆數增加時不會被重設 (原本的滑桿標籤/最大值會變，造成「跑掉」)
+        range_options = ["最近 30 筆", "最近 60 筆", "最近 120 筆", "最近 240 筆", "最近 480 筆", "全部"]
+        range_choice = st.selectbox("顯示範圍", range_options, index=0, key="history_range")
+        st.caption(f"目前共 {total_records} 筆歷史紀錄")
+        limit = total_records if range_choice == "全部" else int(range_choice.split()[1])
 
         df_sub = df.tail(limit).copy()
 
-        def make_perfect_chart(dataframe, y_col, label_name, unit, color):
-            y_min = dataframe[y_col].min()
-            y_max = dataframe[y_col].max()
-            padding = (y_max - y_min) * 0.2 if (y_max - y_min) > 0 else 1
+        # 點太多手機會卡，超過 400 筆就等距抽樣
+        if len(df_sub) > 400:
+            step = -(-len(df_sub) // 400)
+            df_sub = df_sub.iloc[::step].copy()
 
-            domain_min = y_min - padding
-            domain_max = y_max + padding
+        def make_perfect_chart(dataframe, y_col, label_name, unit, color):
+            y_min = float(dataframe[y_col].min())
+            y_max = float(dataframe[y_col].max())
+
+            # Y 軸最小範圍：變化很小時不要放大，避免 25.3→25.2 看起來像斷崖式下降
+            min_span = {'temp': 4.0, 'hum': 10.0, 'pres': 4.0, 'light': 200.0}.get(y_col, 1.0)
+            if (y_max - y_min) < min_span:
+                mid = (y_max + y_min) / 2
+                domain_lo, domain_hi = mid - min_span / 2, mid + min_span / 2
+            else:
+                padding = (y_max - y_min) * 0.1
+                domain_lo, domain_hi = y_min - padding, y_max + padding
+            y_fmt = '.0f' if y_col == 'light' else '.1f'
+
+            span = dataframe['時間'].max() - dataframe['時間'].min()
+            x_format = '%m/%d %H:%M' if span > pd.Timedelta(days=1) else '%H:%M'
+
+            # 標題改放圖表上方，Y 軸不放標題，省出左側空間避免數字被截掉
+            st.caption(f"{label_name} ({unit})")
 
             base = alt.Chart(dataframe).encode(
-                x=alt.X('時間:T', title='時間', axis=alt.Axis(format='%m/%d %H:%M')),
-                y=alt.Y(
-                    f'{y_col}:Q',
-                    title=f'{label_name} ({unit})',
-                    scale=alt.Scale(domain=[domain_min, domain_max])
+                x=alt.X(
+                    '時間:T', title=None,
+                    axis=alt.Axis(format=x_format, tickCount=4, labelAngle=0, labelOverlap='greedy', labelFlush=False),
                 ),
-                tooltip=[alt.Tooltip('時間:T', title='時間', format='%Y-%m-%d %H:%M:%S'), alt.Tooltip(f'{y_col}:Q', title=label_name)]
+                y=alt.Y(
+                    f'{y_col}:Q', title=None,
+                    scale=alt.Scale(domain=[domain_lo, domain_hi], nice=True),
+                    axis=alt.Axis(format=y_fmt, tickCount=5, labelOverlap=True, labelLimit=200),
+                ),
+                tooltip=[
+                    alt.Tooltip('時間:T', title='時間', format='%Y-%m-%d %H:%M:%S'),
+                    alt.Tooltip(f'{y_col}:Q', title=label_name),
+                ],
             )
 
             line = base.mark_line(color=color, strokeWidth=3, interpolate='monotone')
             points = base.mark_circle(color=color, size=40)
             area = base.mark_area(color=color, opacity=0.15, interpolate='monotone')
 
-            return (area + line + points).properties(height=260)
+            return (area + line + points).properties(
+                height=260,
+                padding={"left": 10, "right": 20, "top": 10, "bottom": 10},
+            )
 
         t1, t2, t3, t4 = st.tabs(["🌡️ 溫度", "💧 濕度", "🌪 氣壓", "☀️ 光照"])
 
