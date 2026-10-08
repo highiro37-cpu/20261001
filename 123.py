@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import altair as alt
+import numpy as np
+import json
 import time
 
 # ==========================================
@@ -115,6 +117,78 @@ def parse_status(val):
 
 def fmt_ts(ts_ms):
     return pd.to_datetime(ts_ms, unit='ms', utc=True).tz_convert('Asia/Taipei').strftime('%Y/%m/%d %H:%M:%S')
+
+
+def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos):
+    """X 軸依「第幾筆」均分排列（n 筆就是 n 個等距的點），時間當標籤；資料中斷處斷線並畫虛線"""
+    n = len(dataframe)
+    y_min = float(dataframe[y_col].min())
+    y_max = float(dataframe[y_col].max())
+
+    # Y 軸最小範圍：變化很小時不要放大，避免 25.3→25.2 看起來像斷崖式下降
+    min_span = {'temp': 4.0, 'hum': 10.0, 'pres': 4.0, 'light': 200.0}.get(y_col, 1.0)
+    if (y_max - y_min) < min_span:
+        mid = (y_max + y_min) / 2
+        domain_lo, domain_hi = mid - min_span / 2, mid + min_span / 2
+    else:
+        padding = (y_max - y_min) * 0.1
+        domain_lo, domain_hi = y_min - padding, y_max + padding
+    y_fmt = '.0f' if y_col == 'light' else '.1f'
+
+    # 標題放圖表上方，Y 軸不放標題，省出左側空間
+    st.caption(f"{label_name} ({unit})")
+
+    # X 軸刻度：最多 4 個，用第幾筆的位置對應時間標籤
+    labels = dataframe['標籤'].tolist()
+    if n > 1:
+        tick_idx = sorted(set(int(round(v)) for v in np.linspace(0, n - 1, min(n, 4))))
+    else:
+        tick_idx = [0]
+    label_expr = json.dumps(labels, ensure_ascii=False) + "[datum.value]"
+
+    x_enc = alt.X(
+        '序:Q', title=None,
+        scale=alt.Scale(domain=[-0.5, n - 0.5], nice=False),
+        axis=alt.Axis(values=tick_idx, labelExpr=label_expr, labelAngle=0, grid=False,
+                      labelOverlap='greedy', labelFlush=False),
+    )
+
+    y_enc = alt.Y(
+        f'{y_col}:Q', title=None,
+        scale=alt.Scale(domain=[domain_lo, domain_hi], nice=True),
+        axis=alt.Axis(format=y_fmt, tickCount=5, labelOverlap=True, labelLimit=200),
+    )
+    tooltip = [
+        alt.Tooltip('完整時間:N', title='時間'),
+        alt.Tooltip(f'{y_col}:Q', title=label_name),
+    ]
+    cols = ['序', y_col, '標籤', '完整時間']
+
+    # 每一段資料各自畫線與底色：中斷處自然斷開 (不依賴空值處理，各版本 Vega-Lite 都一致)
+    bounds = [0] + list(gap_pos) + [n]
+    layers = []
+    for lo, hi in zip(bounds[:-1], bounds[1:]):
+        seg = dataframe.iloc[lo:hi][cols]
+        if len(seg) < 2:
+            continue  # 單點不成線，只畫圓點
+        seg_base = alt.Chart(seg).encode(x=x_enc, y=y_enc, tooltip=tooltip)
+        # y2 設在 Y 軸下緣以下並裁切，底色剛好填到圖表底部，不會蓋住時間標籤
+        layers.append(seg_base.mark_area(color=color, opacity=0.15, interpolate='monotone', clip=True).encode(y2=alt.datum(domain_lo - (domain_hi - domain_lo))))
+        layers.append(seg_base.mark_line(color=color, strokeWidth=3, interpolate='monotone'))
+
+    points = alt.Chart(dataframe[cols]).encode(x=x_enc, y=y_enc, tooltip=tooltip).mark_circle(color=color, size=40)
+    layers.append(points)
+
+    if gap_pos:
+        rules = alt.Chart(pd.DataFrame({'序': [g - 0.5 for g in gap_pos]})).mark_rule(
+            color='#9E9E9E', strokeDash=[4, 4], strokeWidth=1.5
+        ).encode(x=x_enc)
+        layers.append(rules)
+
+    return alt.layer(*layers).properties(
+        height=260,
+        padding={"left": 10, "right": 20, "top": 10, "bottom": 10},
+    )
 
 
 if 'predicted_door_status' not in st.session_state:
@@ -356,86 +430,47 @@ with page_tab2:
             step = -(-len(df_sub) // 400)
             df_sub = df_sub.iloc[::step].copy()
 
-        # 偵測資料中斷（感測器離線期間）：超過 3 倍正常間隔就視為斷點，線條在此斷開，不硬連
+        df_sub = df_sub.reset_index(drop=True)
+        df_sub['序'] = range(len(df_sub))
+
+        # 時間標籤：資料跨日就加上日期，否則只顯示時:分
+        label_fmt = '%m/%d %H:%M' if df_sub['時間'].dt.date.nunique() > 1 else '%H:%M'
+        df_sub['標籤'] = df_sub['時間'].dt.strftime(label_fmt)
+        df_sub['完整時間'] = df_sub['時間'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # 偵測資料中斷（感測器離線期間）：超過 3 倍正常間隔就視為斷點
         normal_gap = df['時間'].diff().median()
         if pd.isna(normal_gap):
             normal_gap = pd.Timedelta(minutes=1)
         gap_limit = max(normal_gap * 3 * step, pd.Timedelta(minutes=3))
         time_diff = df_sub['時間'].diff()
-        df_sub['段'] = (time_diff > gap_limit).cumsum()
+        gap_pos = [int(i) for i in df_sub.index[time_diff > gap_limit]]
 
-        gap_rows = df_sub[time_diff > gap_limit]
-        if not gap_rows.empty:
+        if gap_pos:
             shown = []
-            for idx in list(gap_rows.index)[-3:]:
-                end_t = df_sub.loc[idx, '時間']
-                start_t = end_t - time_diff.loc[idx]
+            for i in gap_pos[-3:]:
+                end_t = df_sub.loc[i, '時間']
+                start_t = df_sub.loc[i - 1, '時間']
                 shown.append(f"{start_t.strftime('%m/%d %H:%M')} → {end_t.strftime('%m/%d %H:%M')}")
-            st.caption("⚠️ 此範圍內有資料中斷（感測器離線，線條不連接）：" + "；".join(shown))
-
-        def make_perfect_chart(dataframe, y_col, label_name, unit, color):
-            y_min = float(dataframe[y_col].min())
-            y_max = float(dataframe[y_col].max())
-
-            # Y 軸最小範圍：變化很小時不要放大，避免 25.3→25.2 看起來像斷崖式下降
-            min_span = {'temp': 4.0, 'hum': 10.0, 'pres': 4.0, 'light': 200.0}.get(y_col, 1.0)
-            if (y_max - y_min) < min_span:
-                mid = (y_max + y_min) / 2
-                domain_lo, domain_hi = mid - min_span / 2, mid + min_span / 2
-            else:
-                padding = (y_max - y_min) * 0.1
-                domain_lo, domain_hi = y_min - padding, y_max + padding
-            y_fmt = '.0f' if y_col == 'light' else '.1f'
-
-            span = dataframe['時間'].max() - dataframe['時間'].min()
-            x_format = '%m/%d %H:%M' if span > pd.Timedelta(days=1) else '%H:%M'
-
-            # 標題改放圖表上方，Y 軸不放標題，省出左側空間避免數字被截掉
-            st.caption(f"{label_name} ({unit})")
-
-            base = alt.Chart(dataframe).encode(
-                x=alt.X(
-                    '時間:T', title=None,
-                    axis=alt.Axis(format=x_format, tickCount=4, labelAngle=0, labelOverlap='greedy', labelFlush=False),
-                ),
-                y=alt.Y(
-                    f'{y_col}:Q', title=None,
-                    scale=alt.Scale(domain=[domain_lo, domain_hi], nice=True),
-                    axis=alt.Axis(format=y_fmt, tickCount=5, labelOverlap=True, labelLimit=200),
-                ),
-                tooltip=[
-                    alt.Tooltip('時間:T', title='時間', format='%Y-%m-%d %H:%M:%S'),
-                    alt.Tooltip(f'{y_col}:Q', title=label_name),
-                ],
-            )
-
-            # detail='段:N'：同一段內才連線，中斷處不連接
-            line = base.mark_line(color=color, strokeWidth=3, interpolate='monotone').encode(detail='段:N')
-            points = base.mark_circle(color=color, size=40)
-            area = base.mark_area(color=color, opacity=0.15, interpolate='monotone').encode(detail='段:N')
-
-            return (area + line + points).properties(
-                height=260,
-                padding={"left": 10, "right": 20, "top": 10, "bottom": 10},
-            )
+            st.caption("⚠️ 此範圍內有資料中斷（虛線處，感測器離線）：" + "；".join(shown))
 
         t1, t2, t3, t4 = st.tabs(["🌡️ 溫度", "💧 濕度", "🌪 氣壓", "☀️ 光照"])
 
         with t1:
             if 'temp' in df_sub.columns and not df_sub['temp'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'temp', '溫度', '°C', '#FF4B4B'), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'temp', '溫度', '°C', '#FF4B4B', gap_pos), use_container_width=True)
 
         with t2:
             if 'hum' in df_sub.columns and not df_sub['hum'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'hum', '濕度', '%', '#1E88E5'), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'hum', '濕度', '%', '#1E88E5', gap_pos), use_container_width=True)
 
         with t3:
             if 'pres' in df_sub.columns and not df_sub['pres'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'pres', '氣壓', 'hPa', '#9C27B0'), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'pres', '氣壓', 'hPa', '#9C27B0', gap_pos), use_container_width=True)
 
         with t4:
             if 'light' in df_sub.columns and not df_sub['light'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'light', '光照', 'ADC', '#FFA000'), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'light', '光照', 'ADC', '#FFA000', gap_pos), use_container_width=True)
 
     else:
         st.info("💡 尚未讀取到歷史資料。")
