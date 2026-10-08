@@ -119,7 +119,7 @@ def fmt_ts(ts_ms):
     return pd.to_datetime(ts_ms, unit='ms', utc=True).tz_convert('Asia/Taipei').strftime('%Y/%m/%d %H:%M:%S')
 
 
-def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos):
+def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos, break_lines=False):
     """X 軸依「第幾筆」均分排列（n 筆就是 n 個等距的點），時間當標籤；資料中斷處斷線並畫虛線"""
     n = len(dataframe)
     y_min = float(dataframe[y_col].min())
@@ -165,7 +165,8 @@ def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos):
     cols = ['序', y_col, '標籤', '完整時間']
 
     # 每一段資料各自畫線與底色：中斷處自然斷開 (不依賴空值處理，各版本 Vega-Lite 都一致)
-    bounds = [0] + list(gap_pos) + [n]
+    # break_lines=False（預設）：跨日期 / 中斷的資料也連成一條線；True：中斷處斷開並畫虛線
+    bounds = [0] + list(gap_pos) + [n] if break_lines else [0, n]
     layers = []
     for lo, hi in zip(bounds[:-1], bounds[1:]):
         seg = dataframe.iloc[lo:hi][cols]
@@ -179,7 +180,7 @@ def make_perfect_chart(dataframe, y_col, label_name, unit, color, gap_pos):
     points = alt.Chart(dataframe[cols]).encode(x=x_enc, y=y_enc, tooltip=tooltip).mark_circle(color=color, size=40)
     layers.append(points)
 
-    if gap_pos:
+    if break_lines and gap_pos:
         rules = alt.Chart(pd.DataFrame({'序': [g - 0.5 for g in gap_pos]})).mark_rule(
             color='#9E9E9E', strokeDash=[4, 4], strokeWidth=1.5
         ).encode(x=x_enc)
@@ -421,6 +422,7 @@ with page_tab2:
         )
         limit = min(slider_n, total_records)
         st.caption(f"目前共 {total_records} 筆歷史紀錄，圖表顯示最近 {limit} 筆")
+        break_lines = st.checkbox("資料中斷處斷開連線（預設會連成一條線）", value=False, key="break_gaps")
 
         df_sub = df.tail(limit).copy()
 
@@ -452,25 +454,25 @@ with page_tab2:
                 end_t = df_sub.loc[i, '時間']
                 start_t = df_sub.loc[i - 1, '時間']
                 shown.append(f"{start_t.strftime('%m/%d %H:%M')} → {end_t.strftime('%m/%d %H:%M')}")
-            st.caption("⚠️ 此範圍內有資料中斷（虛線處，感測器離線）：" + "；".join(shown))
+            st.caption("⚠️ 此範圍內有資料中斷（感測器離線期間沒有資料）：" + "；".join(shown))
 
         t1, t2, t3, t4 = st.tabs(["🌡️ 溫度", "💧 濕度", "🌪 氣壓", "☀️ 光照"])
 
         with t1:
             if 'temp' in df_sub.columns and not df_sub['temp'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'temp', '溫度', '°C', '#FF4B4B', gap_pos), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'temp', '溫度', '°C', '#FF4B4B', gap_pos, break_lines), use_container_width=True)
 
         with t2:
             if 'hum' in df_sub.columns and not df_sub['hum'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'hum', '濕度', '%', '#1E88E5', gap_pos), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'hum', '濕度', '%', '#1E88E5', gap_pos, break_lines), use_container_width=True)
 
         with t3:
             if 'pres' in df_sub.columns and not df_sub['pres'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'pres', '氣壓', 'hPa', '#9C27B0', gap_pos), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'pres', '氣壓', 'hPa', '#9C27B0', gap_pos, break_lines), use_container_width=True)
 
         with t4:
             if 'light' in df_sub.columns and not df_sub['light'].empty:
-                st.altair_chart(make_perfect_chart(df_sub, 'light', '光照', 'ADC', '#FFA000', gap_pos), use_container_width=True)
+                st.altair_chart(make_perfect_chart(df_sub, 'light', '光照', 'ADC', '#FFA000', gap_pos, break_lines), use_container_width=True)
 
     else:
         st.info("💡 尚未讀取到歷史資料。")
